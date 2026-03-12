@@ -1,0 +1,717 @@
+import pygame
+import random
+import os
+import time
+
+pygame.init()
+pygame.font.init()
+
+WIDTH = 1400
+HEIGHT = 700
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
+
+def load_image(name, size):
+    fullname = os.path.join('img', name)
+    try:
+        image = pygame.image.load(fullname)
+        return pygame.transform.scale(image, size)
+    except pygame.error as message:
+        print(f'Cannot load image: {name}')
+        print(message)
+        return None
+
+def load_menu_background():
+    backgrounds = []
+    for i in range(1, 4):
+        image = load_image(f'menu_background{i}.png', (WIDTH, HEIGHT))
+        if image:
+            backgrounds.append(image)
+        else:
+            print(f"Failed to load menu_background{i}.png")
+    return backgrounds[0] if backgrounds else None
+
+def load_background_images():
+    backgrounds = []
+    for i in range(1, 5):
+        image = load_image(f'background{i}.png', (WIDTH, HEIGHT))
+        if image:
+            backgrounds.append(image)
+        else:
+            print(f"Failed to load background{i}.png")
+    return backgrounds
+
+menu_background = None
+left_character = None
+right_character = None
+background_images = None
+current_background = None
+
+GAME_MODE = 0  # 0 for normal mode, 1 for time attack mode
+TIME_LIMIT = 8  # 8 seconds per turn
+turn_start_time = 0
+
+TIME_LIMITS = {
+    6: 8,   # 6x6グリッド: 8秒
+    8: 12,  # 8x8グリッド: 12秒
+    10: 15  # 10x10グリッド: 15秒
+}
+
+def init_images():
+    global left_character, right_character, left_character_win, right_character_win, background_images, current_background, menu_background, hako_line_logo, option_background
+    left_character = load_image('c2.png', (320, 500))
+    right_character = load_image('c1.png', (320, 500))
+    left_character_win = load_image('c2_win.png', (320, 500))
+    right_character_win = load_image('c1_win.png', (320, 500))
+    background_images = load_background_images()
+    menu_background = load_menu_background()
+    print(f"Loaded {len(background_images)} background images")
+    if background_images:
+        current_background = random.choice(background_images)
+    else:
+        print("No background images loaded. Using default background.")
+        current_background = pygame.Surface((WIDTH, HEIGHT))
+        current_background.fill((200, 200, 200))
+    hako_line_logo = load_image('hako_line_logo.png', (400, 100))
+    if not hako_line_logo:
+        print("Failed to load HAKO LINE logo")
+    option_background = load_image('option_background.png', (WIDTH, HEIGHT))
+    if not option_background:
+        print("Failed to load option background")
+
+def adjust_layout():
+    global GRID_START_X, GRID_START_Y, GRID_SIZE
+    character_width = 200
+    GRID_START_X = (WIDTH - GRID_TOTAL_WIDTH) // 2
+    GRID_START_Y = (HEIGHT - GRID_TOTAL_HEIGHT) // 2
+    available_width = WIDTH - 2 * character_width
+    GRID_SIZE = min(GRID_SIZE, available_width // GRID_WIDTH, HEIGHT // GRID_HEIGHT)
+
+def draw_characters():
+    left_rect = screen.blit(left_character, (40, HEIGHT // 2 - 100))
+    right_rect = screen.blit(right_character, (WIDTH - 350, HEIGHT // 2 - 150))
+
+    # 現在のプレイヤーの周りを黄色く囲む
+    if player == 0:  # 左側のプレイヤー（黒）の番
+        pygame.draw.rect(screen, yellow, left_rect.inflate(20, 20), 5, border_radius=10)
+    else:  # 右側のプレイヤー（白）の番
+        pygame.draw.rect(screen, yellow, right_rect.inflate(20, 20), 5, border_radius=10)
+
+BUTTON_WIDTH = 200
+BUTTON_HEIGHT = 50
+BUTTON_SPACING = 40
+START_BUTTON = pygame.Rect(WIDTH // 2 - BUTTON_WIDTH // 2, HEIGHT // 2 - 60, BUTTON_WIDTH, BUTTON_HEIGHT)
+OPTION_BUTTON = pygame.Rect(WIDTH // 2 - BUTTON_WIDTH // 2, HEIGHT // 2, BUTTON_WIDTH, BUTTON_HEIGHT)
+START_BUTTON_ACTIVE = False
+OPTION_BUTTON_ACTIVE = False
+
+MENU_BUTTON = pygame.Rect(10, 10, 100, 40)
+OPTION_BUTTON_INGAME = pygame.Rect(120, 10, 100, 40)
+UNDO_BUTTON = pygame.Rect(230, 10, 100, 40)
+
+GRID_6X6_BUTTON = pygame.Rect(WIDTH // 2 - BUTTON_WIDTH * 1.5 - BUTTON_SPACING, HEIGHT // 2 - BUTTON_HEIGHT // 2 - 60, BUTTON_WIDTH, BUTTON_HEIGHT)
+GRID_8X8_BUTTON = pygame.Rect(WIDTH // 2 - BUTTON_WIDTH // 2, HEIGHT // 2 - BUTTON_HEIGHT // 2 - 60, BUTTON_WIDTH, BUTTON_HEIGHT)
+GRID_10X10_BUTTON = pygame.Rect(WIDTH // 2 + BUTTON_WIDTH // 2 + BUTTON_SPACING, HEIGHT // 2 - BUTTON_HEIGHT // 2 - 60, BUTTON_WIDTH, BUTTON_HEIGHT)
+OPTION_MENU_BUTTON = pygame.Rect(WIDTH // 2 - 100, HEIGHT * 3 // 4 + 20, 200, 50)
+
+GAME_SET_MENU_BUTTON = pygame.Rect(WIDTH // 2 - 100, HEIGHT * 3 // 4, 200, 50)
+
+pygame.display.set_caption("Hako Line")
+
+MENU = 0
+PLAYING = 1
+GAME_SET = 2
+OPTION = 3
+game_state = MENU
+
+black = (0, 0, 0)
+white = (255, 255, 255)
+light_black = (100, 100, 100)
+light_white = (200, 200, 200)
+red = (255, 0, 0)
+green = (0, 255, 0)
+blue = (0, 0, 255)
+yellow = (255, 255, 25)
+light_blue = (173, 216, 230)
+light_red = (255, 182, 193)
+light_gray = (200, 200, 200)
+empty = None
+
+FONT = pygame.font.Font(None, 36)
+
+player = 0
+SECOND_PLAYER_RULE = 0
+first_move = True
+
+GRID_SIZES = [(6, 6), (8, 8), (10, 10)]
+GRID_SIZE_INDEX = 0
+GRID_WIDTH, GRID_HEIGHT = GRID_SIZES[GRID_SIZE_INDEX]
+WIN_LENGTHS = {6: 4, 8: 5, 10: 6}
+GRID_SIZE = 110
+
+move_history = []
+
+def update_grid_size():
+    global GRID_WIDTH, GRID_HEIGHT, GRID_SIZE, GRID_TOTAL_WIDTH, GRID_TOTAL_HEIGHT, GRID_START_X, GRID_START_Y
+    GRID_WIDTH, GRID_HEIGHT = GRID_SIZES[GRID_SIZE_INDEX]
+    max_grid_size_w = (WIDTH * 0.9) // GRID_WIDTH
+    max_grid_size_h = (HEIGHT * 0.9) // GRID_HEIGHT
+    GRID_SIZE = int(min(max_grid_size_w, max_grid_size_h))
+    GRID_TOTAL_WIDTH = GRID_WIDTH * GRID_SIZE
+    GRID_TOTAL_HEIGHT = GRID_HEIGHT * GRID_SIZE
+    GRID_START_X = (WIDTH - GRID_TOTAL_WIDTH) // 2
+    GRID_START_Y = (HEIGHT - GRID_TOTAL_HEIGHT) // 2
+    print(f"Grid updated: {GRID_WIDTH}x{GRID_HEIGHT}, Cell size: {GRID_SIZE}")
+
+update_grid_size()
+
+grid = [[empty for _ in range(GRID_WIDTH)] for _ in range(GRID_HEIGHT)]
+GRID_TOTAL_WIDTH = GRID_WIDTH * GRID_SIZE
+GRID_TOTAL_HEIGHT = GRID_HEIGHT * GRID_SIZE
+GRID_START_X = (WIDTH - GRID_TOTAL_WIDTH) // 2
+GRID_START_Y = (HEIGHT - GRID_TOTAL_HEIGHT) // 2
+
+def draw_grid():
+    if current_background:
+        screen.blit(current_background, (0, 0))
+    else:
+        screen.fill((200, 200, 200))
+    for y in range(GRID_HEIGHT):
+        for x in range(GRID_WIDTH):
+            rect_x = GRID_START_X + x * GRID_SIZE
+            rect_y = GRID_START_Y + y * GRID_SIZE
+
+            if grid[y][x] != empty:
+                pygame.draw.rect(screen, grid[y][x], (rect_x + 1, rect_y + 1, GRID_SIZE - 2, GRID_SIZE - 2), border_radius=10)
+
+            if is_valid_move(x, y, player, first_move):
+                color = light_black if player == 0 else light_white
+                pygame.draw.rect(screen, color, (rect_x + 1, rect_y + 1, GRID_SIZE - 2, GRID_SIZE - 2), border_radius=10)
+
+            pygame.draw.rect(screen, black, (rect_x, rect_y, GRID_SIZE, GRID_SIZE), 1)
+
+    pygame.draw.rect(screen, (200, 200, 200), MENU_BUTTON, border_radius=10)
+    font = pygame.font.Font(None, 24)
+    menu_text = font.render("MENU", True, black)
+    screen.blit(menu_text, (MENU_BUTTON.centerx - menu_text.get_width() // 2, MENU_BUTTON.centery - menu_text.get_height() // 2))
+
+    pygame.draw.rect(screen, (200, 200, 200), OPTION_BUTTON_INGAME, border_radius=10)
+    option_text = font.render("OPTION", True, black)
+    screen.blit(option_text, (OPTION_BUTTON_INGAME.centerx - option_text.get_width() // 2, OPTION_BUTTON_INGAME.centery - option_text.get_height() // 2))
+
+    pygame.draw.rect(screen, (200, 200, 200), UNDO_BUTTON, border_radius=10)
+    undo_text = font.render("RETURN", True, black)
+    screen.blit(undo_text, (UNDO_BUTTON.centerx - undo_text.get_width() // 2, UNDO_BUTTON.centery - undo_text.get_height() // 2))
+
+    draw_characters()
+
+    mouse_x, mouse_y = pygame.mouse.get_pos()
+    cell = get_grid(mouse_x, mouse_y)
+    if cell:
+        grid_x, grid_y = cell
+        if is_valid_move(int(grid_x), int(grid_y), player, first_move):
+            rect_x = GRID_START_X + grid_x * GRID_SIZE
+            rect_y = GRID_START_Y + grid_y * GRID_SIZE
+            pygame.draw.rect(screen, yellow, (rect_x + 1, rect_y + 1, GRID_SIZE - 2, GRID_SIZE - 2), 3)
+
+def handle_playing_click(pos):
+    global game_state, player
+    if MENU_BUTTON.collidepoint(pos):
+        game_state = MENU
+    elif OPTION_BUTTON_INGAME.collidepoint(pos):
+        game_state = OPTION
+    elif UNDO_BUTTON.collidepoint(pos):
+        undo_move()
+    else:
+        cell = get_grid(pos[0], pos[1])
+        if cell:
+            grid_x, grid_y = cell
+            draw_grid_fill(int(grid_x), int(grid_y))
+
+def get_grid(x, y):
+    if GRID_START_X <= x < GRID_START_X + GRID_TOTAL_WIDTH and GRID_START_Y <= y < GRID_START_Y + GRID_TOTAL_HEIGHT:
+        grid_x = int((x - GRID_START_X) // GRID_SIZE)
+        grid_y = int((y - GRID_START_Y) // GRID_SIZE)
+        return grid_x, grid_y
+    return None
+
+def change_grid_size():
+    global GRID_SIZE_INDEX
+    GRID_SIZE_INDEX = (GRID_SIZE_INDEX + 1) % len(GRID_SIZES)
+    update_grid_size()
+    reset_grid()
+    print(f"Grid size changed to {GRID_WIDTH}x{GRID_HEIGHT}")
+
+def is_valid_first_move(x, y, player):
+    x, y = int(x), int(y)
+    if player == 0:
+        return x == 0 or x == GRID_WIDTH - 1 or y == 0 or y == GRID_HEIGHT - 1
+    else:
+        edge_condition = (x == 0 or x == GRID_WIDTH - 1 or y == 0 or  y == GRID_HEIGHT - 1)
+
+        if SECOND_PLAYER_RULE == 0:
+            edge_plus_one = (x == 1 or x == GRID_WIDTH - 2 or y == 1 or y == GRID_HEIGHT - 2)
+            return edge_condition or edge_plus_one
+        else:
+            center_x = GRID_WIDTH // 2
+            center_y = GRID_HEIGHT // 2
+            center_condition = (center_x - 1 <= x <= center_x and
+                                center_y - 1 <= y <= center_y)
+            return edge_condition or center_condition
+
+def is_edge(x, y):
+    return x == 0 or x == GRID_WIDTH - 1 or y == 0 or y == GRID_HEIGHT - 1
+
+def is_adjacent_to_filled(x, y):
+    x, y = int(x), int(y)
+    for dx in [-1, 0, 1]:
+        for dy in [-1, 0, 1]:
+            if dx == 0 and dy == 0:
+                continue
+            nx, ny = x + dx, y + dy
+            if 0 <= nx < GRID_WIDTH and 0 <= ny < GRID_HEIGHT:
+                if grid[ny][nx] != empty:
+                    return True
+    return False
+
+def is_valid_move(x, y, player, is_first_move):
+    x, y = int(x), int(y)
+    if x < 0 or x >= GRID_WIDTH or y < 0 or y >= GRID_HEIGHT:
+        return False
+    if grid[y][x] != empty:
+        return False
+    if is_first_move:
+        return is_valid_first_move(x, y, player)
+    else:
+        return is_edge(x, y) or is_adjacent_to_filled(x, y)
+
+def get_valid_moves(player):
+    valid_moves = []
+    for y in range(GRID_HEIGHT):
+        for x in range(GRID_WIDTH):
+            if is_valid_move(x, y, player, first_move):
+                valid_moves.append((x, y))
+    return valid_moves
+
+def draw_grid_fill(grid_x, grid_y):
+    global player, game_state, first_move, move_history, turn_start_time
+
+    grid_x, grid_y = int(grid_x), int(grid_y)
+
+    print(f"Attempting to fill: ({grid_x}, {grid_y})")
+    print(f"First move: {first_move}")
+    print(f"Current player: {player}")
+
+    if not is_valid_move(grid_x, grid_y, player, first_move):
+        print("Invalid move")
+        return False
+
+    current_color = black if player == 0 else white
+    grid[grid_y][grid_x] = current_color
+    print(f"Cell filled with {'black' if player == 0 else 'white'}")
+
+    move_history.append((grid_x, grid_y, player, first_move))
+
+    if check_win(grid, current_color):
+        game_state = GAME_SET
+        print("Game set!")
+    elif is_game_over(grid):
+        game_state = GAME_SET
+        print("Game over!")
+    else:
+        player = 1 - player
+        print(f"Next player: {player}")
+        turn_start_time = time.time()  # Reset the turn timer
+
+    if first_move and player == 1:
+        print("First player's move completed")
+    elif first_move and player == 0:
+        first_move = False
+        print("Second player's move completed, first move ended")
+
+    return True
+
+def undo_move():
+    global player, first_move, move_history, grid, turn_start_time
+    if move_history:
+        last_move = move_history.pop()
+        x, y, last_player, was_first_move = last_move
+        grid[y][x] = empty
+        player = last_player
+        first_move = was_first_move
+        turn_start_time = time.time()  # Reset the turn timer
+        print(f"Move undone: ({x}, {y})")
+
+def reset_grid():
+    global grid, player, first_move, move_history, turn_start_time
+    grid = [[empty for _ in range(GRID_WIDTH)] for _ in range(GRID_HEIGHT)]
+    player = 0
+    first_move = True
+    move_history = []
+    turn_start_time = time.time()  # Initialize the turn timer
+    print(f"Grid reset to {GRID_WIDTH}x{GRID_HEIGHT}")
+
+def check_win(grid, color):
+    win_length = WIN_LENGTHS[GRID_WIDTH]
+    winning_cells = []
+
+    def is_corner(x, y):
+        return (x == 0 and y == 0) or (x == 0 and y == GRID_HEIGHT-1) or \
+            (x == GRID_WIDTH-1 and y == 0) or (x == GRID_WIDTH-1 and y == GRID_HEIGHT-1)
+
+    def check_line(start_x, start_y, dx, dy):
+        count = 0
+        line_cells = []
+        for i in range(max(GRID_WIDTH, GRID_HEIGHT)):
+            x, y = start_x + i*dx, start_y + i*dy
+            if 0 <= x < GRID_WIDTH and 0 <= y < GRID_HEIGHT:
+                if grid[y][x] == color:
+                    count += 1
+                    line_cells.append((x, y))
+                    if count == win_length:
+                        start_x, start_y = x - (win_length-1)*dx, y - (win_length-1)*dy
+                        if not (is_corner(start_x, start_y) or is_corner(x, y)):
+                            return line_cells
+                else:
+                    count = 0
+                    line_cells = []
+            else:
+                break
+        return []
+
+    directions = [(1, 0), (0, 1), (1, 1), (1, -1)]
+    for dx, dy in directions:
+        for y in range(GRID_HEIGHT):
+            for x in range(GRID_WIDTH):
+                winning_cells = check_line(x, y, dx, dy)
+                if winning_cells:
+                    return winning_cells
+
+    return []
+
+def count_corner_colors(grid):
+    corners = [(0, 0), (0, GRID_HEIGHT-1), (GRID_WIDTH-1, 0), (GRID_WIDTH-1, GRID_HEIGHT-1)]
+    black_corners = []
+    white_corners = []
+    for x, y in corners:
+        if grid[y][x] == black:
+            black_corners.append((x, y))
+        elif grid[y][x] == white:
+            white_corners.append((x, y))
+    return black_corners, white_corners
+
+def draw_victory_highlight(screen, winning_cells, corner_cells):
+    highlight_color = yellow
+    for x, y in winning_cells + corner_cells:
+        rect_x = GRID_START_X + x * GRID_SIZE
+        rect_y = GRID_START_Y + y * GRID_SIZE
+        pygame.draw.rect(screen, highlight_color, (rect_x, rect_y, GRID_SIZE, GRID_SIZE), 3)
+
+def draw_menu():
+    if menu_background:
+        screen.blit(menu_background, (0, 0))
+    else:
+        screen.fill(white)
+    if hako_line_logo:
+        logo_x = (WIDTH - hako_line_logo.get_width()) // 2
+        logo_y = HEIGHT // 6 - hako_line_logo.get_height() // 2
+        screen.blit(hako_line_logo, (logo_x, logo_y))
+
+    font = pygame.font.Font(None, 36)
+
+    pygame.draw.rect(screen, black, START_BUTTON, border_radius=10)
+    start_text = font.render("START", True, white)
+    screen.blit(start_text, (START_BUTTON.centerx - start_text.get_width() // 2, START_BUTTON.centery - start_text.get_height() // 2))
+
+    pygame.draw.rect(screen, black, OPTION_BUTTON, border_radius=10)
+    option_text = font.render("OPTION", True, white)
+    screen.blit(option_text, (OPTION_BUTTON.centerx - option_text.get_width() // 2, OPTION_BUTTON.centery - option_text.get_height() // 2))
+
+def handle_menu_click(pos):
+    global game_state
+    if START_BUTTON.collidepoint(pos):
+        game_state = PLAYING
+        reset_grid()
+    elif OPTION_BUTTON.collidepoint(pos):
+        game_state = OPTION
+
+def update_menu_hover(pos):
+    global START_BUTTON_ACTIVE, OPTION_BUTTON_ACTIVE
+    prev_start = START_BUTTON_ACTIVE
+    prev_option = OPTION_BUTTON_ACTIVE
+    START_BUTTON_ACTIVE = START_BUTTON.collidepoint(pos)
+    OPTION_BUTTON_ACTIVE = OPTION_BUTTON.collidepoint(pos)
+    return prev_start != START_BUTTON_ACTIVE or prev_option != OPTION_BUTTON_ACTIVE
+
+def draw_game_set():
+    if current_background:
+        screen.blit(current_background, (0, 0))
+    else:
+        screen.fill((200, 200, 200))
+    font = pygame.font.Font(None, 72)
+
+    winning_cells = []
+    corner_cells = []
+    if check_win(grid, black):
+        winner = "Black"
+        color = black
+        winning_cells = check_win(grid, black)
+    elif check_win(grid, white):
+        winner = "White"
+        color = white
+        winning_cells = check_win(grid, white)
+    else:
+        black_corners, white_corners = count_corner_colors(grid)
+        if len(black_corners) > len(white_corners):
+            winner = "Black"
+            color = black
+            corner_cells = black_corners
+        elif len(white_corners) > len(black_corners):
+            winner = "White"
+            color = white
+            corner_cells = white_corners
+        else:
+            winner = "Draw"
+            color = light_gray
+
+    if winner == "Draw":
+        title = font.render("It's a Draw!", True, color)
+    else:
+        title = font.render(f"{winner} Wins!", True, color)
+
+    screen.blit(title, (WIDTH // 2 - title.get_width() // 2, HEIGHT // 2 - title.get_height() // 2))
+
+    # Draw the grid
+    draw_grid()
+
+    # Highlight winning cells or corners
+    draw_victory_highlight(screen, winning_cells, corner_cells)
+
+    if winner == "Black":
+        screen.blit(left_character_win, (40, HEIGHT // 2 - 100))
+    elif winner == "White":
+        screen.blit(right_character_win, (WIDTH - 350, HEIGHT // 2 - 150))
+
+    font = pygame.font.Font(None, 36)
+
+    pygame.draw.rect(screen, (200, 200, 200), GAME_SET_MENU_BUTTON)
+    menu_text = font.render("Back to MENU", True, black)
+    screen.blit(menu_text, (GAME_SET_MENU_BUTTON.centerx - menu_text.get_width() // 2, GAME_SET_MENU_BUTTON.centery - menu_text.get_height() // 2))
+
+    instruction = font.render("Press SPACE or click the button to return to menu", True, white)
+    screen.blit(instruction, (WIDTH // 2 - instruction.get_width() // 2, HEIGHT * 3 // 4 - 50))
+
+def handle_game_set_click(pos):
+    global game_state
+    if GAME_SET_MENU_BUTTON.collidepoint(pos):
+        game_state = MENU
+        reset_grid()
+        return True
+    return False
+
+def is_game_over(grid):
+    return all(cell != empty for row in grid for cell in row)
+
+def handle_option_click(pos):
+    global GRID_SIZE_INDEX, SECOND_PLAYER_RULE, GAME_MODE, game_state
+    changed = False
+    if GRID_6X6_BUTTON.collidepoint(pos) and GRID_SIZE_INDEX != 0:
+        GRID_SIZE_INDEX = 0
+        changed = True
+    elif GRID_8X8_BUTTON.collidepoint(pos) and GRID_SIZE_INDEX != 1:
+        GRID_SIZE_INDEX = 1
+        changed = True
+    elif GRID_10X10_BUTTON.collidepoint(pos) and GRID_SIZE_INDEX != 2:
+        GRID_SIZE_INDEX = 2
+        changed = True
+    elif OPTION_MENU_BUTTON.collidepoint(pos):
+        game_state = MENU
+        return True
+
+    edge_button = pygame.Rect(WIDTH // 2 - 150, HEIGHT * 2 // 3 - 90, 140, 40)
+    center_button = pygame.Rect(WIDTH // 2 + 10, HEIGHT * 2 // 3 - 90, 140, 40)
+
+    if edge_button.collidepoint(pos) and SECOND_PLAYER_RULE != 0:
+        SECOND_PLAYER_RULE = 0
+        changed = True
+    elif center_button.collidepoint(pos) and SECOND_PLAYER_RULE != 1:
+        SECOND_PLAYER_RULE = 1
+        changed = True
+
+    normal_mode_button = pygame.Rect(WIDTH // 2 - 150, HEIGHT * 2 // 3 + 20, 140, 40)
+    time_attack_button = pygame.Rect(WIDTH // 2 + 10, HEIGHT * 2 // 3 + 20, 140, 40)
+
+    if normal_mode_button.collidepoint(pos) and GAME_MODE != 0:
+        GAME_MODE = 0
+        changed = True
+    elif time_attack_button.collidepoint(pos) and GAME_MODE != 1:
+        GAME_MODE = 1
+        changed = True
+
+    menu_button = pygame.Rect(WIDTH // 2 - 100, HEIGHT * 3 // 4 + 50, 200, 50)
+    if menu_button.collidepoint(pos):
+        game_state = MENU
+        return True
+
+    if changed:
+        update_grid_size()
+        reset_grid()
+
+    return changed
+
+def draw_option():
+    if option_background:
+        screen.blit(option_background, (0, 0))
+    else:
+        screen.fill(white)
+    font = pygame.font.Font(None, 72)
+    title = font.render("Option", True, white)
+    screen.blit(title, (WIDTH // 2 - title.get_width() // 2, HEIGHT // 6))
+
+    font = pygame.font.Font(None, 36)
+
+    buttons = [GRID_6X6_BUTTON, GRID_8X8_BUTTON, GRID_10X10_BUTTON]
+    texts = ["6x6", "8x8", "10x10"]
+
+    grid_size_text = font.render("Select Grid Size:", True, white)
+    screen.blit(grid_size_text, (WIDTH // 2 - grid_size_text.get_width() // 2, HEIGHT // 3 - 10))
+
+    for i, (button, text) in enumerate(zip(buttons, texts)):
+        color = yellow if i == GRID_SIZE_INDEX else light_black
+        pygame.draw.rect(screen, color, button, border_radius=10)
+        text_surface = font.render(text, True, white)
+        screen.blit(text_surface, (button.centerx - text_surface.get_width() // 2, button.centery - text_surface.get_height() // 2))
+
+    rule_text = font.render("Second Player's First Move:", True, white)
+    screen.blit(rule_text, (WIDTH // 2 - rule_text.get_width() // 2, HEIGHT * 2 // 3 - 130))
+
+    edge_button = pygame.Rect(WIDTH // 2 - 150, HEIGHT * 2 // 3 - 90, 140, 40)
+    center_button = pygame.Rect(WIDTH // 2 + 10, HEIGHT * 2 // 3 -90, 140, 40)
+
+    pygame.draw.rect(screen, yellow if SECOND_PLAYER_RULE == 0 else light_black, edge_button, border_radius=10)
+    pygame.draw.rect(screen, yellow if SECOND_PLAYER_RULE == 1 else light_black, center_button, border_radius=10)
+
+    edge_text = font.render("Edge", True, white)
+    center_text = font.render("Center", True, white)
+
+    screen.blit(edge_text, (edge_button.centerx - edge_text.get_width() // 2, edge_button.centery - edge_text.get_height() // 2 ))
+    screen.blit(center_text, (center_button.centerx - center_text.get_width() // 2, center_button.centery - center_text.get_height() // 2 ))
+
+    mode_text = font.render("Game Mode:", True, white)
+    screen.blit(mode_text, (WIDTH // 2 - mode_text.get_width() // 2, HEIGHT * 2 // 3  - 30))
+
+    normal_mode_button = pygame.Rect(WIDTH // 2 - 150, HEIGHT * 2 // 3 + 20, 140, 40)
+    time_attack_button = pygame.Rect(WIDTH // 2 + 10, HEIGHT * 2 // 3 + 20, 140, 40)
+
+    pygame.draw.rect(screen, yellow if GAME_MODE == 0 else light_black, normal_mode_button, border_radius=10)
+    pygame.draw.rect(screen, yellow if GAME_MODE == 1 else light_black, time_attack_button, border_radius=10)
+
+    normal_text = font.render("Normal", True, white)
+    time_attack_text = font.render("Time Attack", True, white)
+
+    screen.blit(normal_text, (normal_mode_button.centerx - normal_text.get_width() // 2, normal_mode_button.centery - normal_text.get_height() // 2))
+    screen.blit(time_attack_text, (time_attack_button.centerx - time_attack_text.get_width() // 2, time_attack_button.centery - time_attack_text.get_height() // 2))
+
+    pygame.draw.rect(screen, light_black, OPTION_MENU_BUTTON, border_radius=10)
+    menu_text = font.render("Back to MENU", True, white)
+    screen.blit(menu_text, (OPTION_MENU_BUTTON.centerx - menu_text.get_width() // 2, OPTION_MENU_BUTTON.centery - menu_text.get_height() // 2))
+
+    current_size_text = font.render(f"Current Size: {GRID_WIDTH}x{GRID_HEIGHT}", True, white)
+    screen.blit(current_size_text, (WIDTH // 2 - current_size_text.get_width() // 2, HEIGHT * 5 // 6 + 20))
+
+def make_random_move():
+    valid_moves = get_valid_moves(player)
+    if valid_moves:
+        x, y = random.choice(valid_moves)
+        draw_grid_fill(x, y)
+
+def main():
+    global running, clock, redraw, game_state, player, first_move, current_background, turn_start_time
+
+    pygame.init()
+    clock = pygame.time.Clock()
+
+    init_images()
+    reset_grid()
+
+    running = True
+    redraw = True
+
+    while running:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                if event.button == 1:
+                    if game_state == MENU:
+                        handle_menu_click(event.pos)
+                    elif game_state == PLAYING:
+                        handle_playing_click(event.pos)
+                    elif game_state == OPTION:
+                        handle_option_click(event.pos)
+                    elif game_state == GAME_SET:
+                        handle_game_set_click(event.pos)
+                    redraw = True
+            elif event.type == pygame.MOUSEMOTION:
+                if game_state == MENU:
+                    if update_menu_hover(event.pos):
+                        redraw = True
+            elif event.type == pygame.KEYDOWN:
+                if game_state == MENU:
+                    if event.key == pygame.K_1:
+                        game_state = PLAYING
+                        reset_grid()
+                    elif event.key == pygame.K_2:
+                        game_state = OPTION
+                elif game_state == PLAYING:
+                    if event.key == pygame.K_SPACE:
+                        game_state = MENU
+                    elif event.key == pygame.K_2:
+                        game_state = OPTION
+                    elif event.key == pygame.K_u:
+                        undo_move()
+                    elif event.key == pygame.K_b:
+                        current_background = random.choice(background_images)
+                        redraw = True
+                elif game_state == OPTION:
+                    if event.key == pygame.K_SPACE:
+                        game_state = MENU
+                    elif event.key == pygame.K_c:
+                        change_grid_size()
+                elif game_state == GAME_SET:
+                    if event.key == pygame.K_SPACE:
+                        game_state = MENU
+                        reset_grid()
+                    elif event.key == pygame.K_1:
+                        game_state = PLAYING
+                        reset_grid()
+                    elif event.key == pygame.K_2:
+                        game_state = OPTION
+                        reset_grid()
+                redraw = True
+
+        if game_state == PLAYING and GAME_MODE == 1:
+            current_time = time.time()
+            current_time_limit = TIME_LIMITS[GRID_WIDTH]  # Get the time limit based on the current grid size
+            if current_time - turn_start_time >= current_time_limit:
+                make_random_move()
+                redraw = True
+
+        if redraw:
+            if game_state == PLAYING:
+                draw_grid()
+            elif game_state == MENU:
+                draw_menu()
+            elif game_state == GAME_SET:
+                draw_game_set()
+            elif game_state == OPTION:
+                draw_option()
+
+            pygame.display.flip()
+            redraw = False
+
+        clock.tick(60)
+
+    pygame.quit()
+
+if __name__ == "__main__":
+    main()
